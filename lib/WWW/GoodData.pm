@@ -215,20 +215,57 @@ Obtain a SST (login token).
 sub login
 {
 	my $self = shift;
-	my ($login, $password) = @_;
+	my ($login, $password, $url_cache) = @_;
 
-	my $root = new URI ($self->{agent}{root});
-	my $staging = $self->get_uri ('uploads')->abs ($root);
-	my $netloc = $staging->host.':'.$staging->port;
+	my $root_url = $self->{agent}{root};
+	my $root = new URI($root_url);
+
+	my $netloc;
+	if ( $url_cache ) {
+		die "Provided login '$login' doesn't match cached one '$url_cache->{login}'.\n"
+			unless $url_cache->{login} eq $login;
+		die "Provided login '$root_url' doesn't match cached one '$url_cache->{root_url}'.\n"
+			unless $url_cache->{root_url} eq $root_url;
+
+		$netloc = $url_cache->{netloc};
+
+	} else {
+		my $staging = $self->get_uri ('uploads')->abs ($root);
+		$netloc = $staging->host.':'.$staging->port;
+	}
 
 	$self->{agent}->credentials ($netloc,
 		'GoodData project data staging area', $login => $password);
 
-	$self->{login} = $self->{agent}->post ($self->get_uri ('login'),
+	if ( $url_cache ) {
+		$self->{login} = $url_cache->{login_obj};
+		$self->{url_cache} = $url_cache;
+
+	} else {
+		$self->{login} = $self->{agent}->post ($self->get_uri('login'),
 		{postUserLogin => {
 			login => $login,
 			password => $password,
 			remember => 0}});
+
+		$self->{url_cache} = {};
+		$self->set_url_cache_kv( 'root_url', $root_url );
+		$self->set_url_cache_kv( 'login', $login );
+		$self->set_url_cache_kv( 'netloc', $netloc );
+		$self->set_url_cache_kv( 'login_obj', $self->{login} );
+	}
+
+	return $self->{login};
+}
+
+sub set_url_cache_kv {
+	my ( $self, $key, $value ) = @_;
+	$self->{url_cache}{$key} = $value;
+}
+
+sub get_url_cache {
+	my $self = shift;
+	return $self->{url_cache};
 }
 
 =item B<logout>
