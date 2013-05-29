@@ -830,7 +830,7 @@ Log out the session with B<logout> unless not logged in.
 sub DESTROY
 {
 	my $self = shift;
-	$self->logout if $self->{login};
+	#$self->logout if $self->{login};
 }
 
 sub slurp_file

@@ -27,6 +27,7 @@ use warnings;
 
 use base qw/LWP::UserAgent/;
 use JSON;
+use Time::HiRes qw/time/;
 
 our $VERSION = '1.0';
 
@@ -60,10 +61,14 @@ sub new
 {
 	my ($self, $root, @args) = @_;
 	$self = $self->SUPER::new (@args);
+	if ( $self->can('ssl_opts') ) {
+		$self->ssl_opts( verify_hostname => 0 ) ;
+		$self->ssl_opts( SSL_verify_mode => 'SSL_VERIFY_NONE' );
+	}
 	$self->{root} = $root;
 	$self->agent ("perl-WWW-GoodData/$VERSION ");
 	# Not backed by a file yet
-	$self->cookie_jar ({});
+	#$self->cookie_jar({});
 	# Prefer JSON, but deal with whatever else comes in, instead of letting backend return 406s
 	$self->default_header (Accept =>
 		'application/json;q=0.9, text/plain;q=0.2, */*;q=0.1');
@@ -87,6 +92,7 @@ sub post
 	my ($self, $uri, $body, @args) = @_;
 	push @args,'Content-Type' => 'application/json',
 		Content => encode_json ($body);
+
 	return $self->SUPER::post ($uri, @args);
 }
 
@@ -141,8 +147,16 @@ sub request
 	# URI relative to root
 	$request->uri ($request->uri->abs ($self->{root}));
 
+	print "request: $request->{_uri} $request->{_method}\n";
+	#use Data::Dumper; print Dumper( $request );
+
+	my $stime = time();
 	# Issue the request
 	my $response = $self->SUPER::request ($request, @args);
+
+	my $time_diff_str = sprintf( '%1.0d', (time() - $stime) * 1000 );
+	print "response: $response->{_rc} $response->{_msg} ($time_diff_str ms)\n";
+	#use Data::Dumper; print Dumper( $response );
 
 	# Pass processed response from subrequest (redirect)
 	return $response if ref $response eq 'HASH';
@@ -164,7 +178,10 @@ sub request
 		$decoded = $decoded->{error} if exists $decoded->{error};
 		my $request_id = $response->header ('X-GDC-Request') || "";
 		$request_id = " (Request ID: $request_id)" if $request_id;
-		die $response->status_line.$request_id unless exists $decoded->{message};
+		use Carp qw(carp croak);
+		use Data::Dumper;
+		print Dumper( $response ) unless exists $decoded->{message};;
+		croak $response->status_line. ', request_id: ' .$request_id unless exists $decoded->{message};
 		die sprintf ($decoded->{message}, @{$decoded->{parameters}}).$request_id;
 	}
 
