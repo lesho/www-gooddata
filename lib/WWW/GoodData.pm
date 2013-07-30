@@ -581,70 +581,73 @@ sub upload
 	my $file = shift;
 	my $csvs_conf = shift;
 
-	# Parse the manifest
-	my $upload_info = decode_json (slurp_file ($file));
-	die "$file: not a SLI or DLI manifest"
-		unless $upload_info->{dataSetSLIManifest} || $upload_info->{dataSetManifest};
+	my $zip_upload = (defined $file) ? 0 : 1;
 
 	# Construct unique URI in staging area to upload to
 	my $uploads = new URI ($self->get_uri ('uploads'));
 	#print $self->get_uri('uploads')." \n";
 
-	# SLI
-	if ( exists $upload_info->{dataSetSLIManifest} ) {
+	my $upload_info;
+	# no zip
+
+	if ( $zip_upload ) {
 		$uploads->path_segments(
 			$uploads->path_segments,
-			$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time
+			'uploads'
 		);
+		$self->{agent}->request (new HTTP::Request (MKCOL => $uploads));
 
-	# DLI
 	} else {
-		$uploads->path_segments(
-			$uploads->path_segments,
-			'dli-'.time
-		);
-	}
+		# Parse the manifest
+		$upload_info = decode_json (slurp_file ($file));
+		die "$file: not a SLI or DLI manifest"
+			unless $upload_info->{dataSetSLIManifest} || $upload_info->{dataSetManifest};
 
-	$self->{agent}->request (new HTTP::Request (MKCOL => $uploads));
+		# SLI
+		if ( exists $upload_info->{dataSetSLIManifest} ) {
+			$uploads->path_segments(
+				$uploads->path_segments,
+				$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time
+			);
 
-	# Upload the manifest
-	my $manifest = $uploads->clone;
-	$manifest->path_segments ($manifest->path_segments, 'upload_info.json');
-	$self->{agent}->request (new HTTP::Request (PUT => $manifest,
-		['Content-Type' => 'application/json'], encode_json ($upload_info)));
-
-	# Upload one or more CSVs
-
-	# SLI
-	if ( exists $upload_info->{dataSetSLIManifest} ) {
-		my $csv_dest_fname = (keys %$csvs_conf)[0];
-		my $csv_manifest_fname = $upload_info->{dataSetSLIManifest}{file};
-
-		die "CSV file '$csv_dest_fname' doesn't match manifest name '$csv_manifest_fname'."
-			unless $csv_dest_fname eq $csv_manifest_fname;
-
-		my $csv_src_fpath = $csvs_conf->{ $csv_dest_fname };
-		die "CSV file '$csv_src_fpath' not found." unless -f $csv_src_fpath;
-
-		my $csv = $uploads->clone;
-		$csv->path_segments( $csv->path_segments, $csv_dest_fname );
-		$self->{agent}->request( new HTTP::Request(
-			PUT => $csv,
-			['Content-Type' => 'application/csv'],
-			slurp_file($csv_src_fpath)
-		) );
-
-	# DLI
-	} else {
-		my $csv_manifest_fnames;
-		foreach my $part ( @{ $upload_info->{dataSetManifest}{parts} } ) {
-			$csv_manifest_fnames->{ $part->{file} } = 1;
+		# DLI
+		} else {
+			$uploads->path_segments(
+				$uploads->path_segments,
+				'dli-'.time
+			);
 		}
 
-		foreach my $csv_dest_fname ( keys %$csvs_conf ) {
+		$self->{agent}->request (new HTTP::Request (MKCOL => $uploads));
 
-			die "CSV file '$csv_dest_fname' doesn't match any file name found inside DLI manifest."
-				unless exists $csv_manifest_fnames->{ $csv_dest_fname };
+		# Upload the manifest
+		my $manifest = $uploads->clone;
+		$manifest->path_segments ($manifest->path_segments, 'upload_info.json');
+		$self->{agent}->request (new HTTP::Request (PUT => $manifest,
+			['Content-Type' => 'application/json'], encode_json ($upload_info)));
+	}
+
+
+	# Upload ZIP.
+	if ( $zip_upload ) {
+		my $zip_fpath = $csvs_conf;
+		my $zip = $uploads->clone;
+		$zip->path_segments( $zip->path_segments, 'upload.zip' );
+		$self->{agent}->request( new HTTP::Request(
+			PUT => $zip,
+			['Content-Type' => 'application/binary'],
+			slurp_file($zip_fpath, binmode => ':raw')
+		) );
+
+	# Upload one or more CSVs
+	} else {
+		# SLI
+		if ( exists $upload_info->{dataSetSLIManifest} ) {
+			my $csv_dest_fname = (keys %$csvs_conf)[0];
+			my $csv_manifest_fname = $upload_info->{dataSetSLIManifest}{file};
+
+			die "CSV file '$csv_dest_fname' doesn't match manifest name '$csv_manifest_fname'."
+				unless $csv_dest_fname eq $csv_manifest_fname;
 
 			my $csv_src_fpath = $csvs_conf->{ $csv_dest_fname };
 			die "CSV file '$csv_src_fpath' not found." unless -f $csv_src_fpath;
@@ -656,6 +659,30 @@ sub upload
 				['Content-Type' => 'application/csv'],
 				slurp_file($csv_src_fpath)
 			) );
+
+		# DLI
+		} else {
+			my $csv_manifest_fnames;
+			foreach my $part ( @{ $upload_info->{dataSetManifest}{parts} } ) {
+				$csv_manifest_fnames->{ $part->{file} } = 1;
+			}
+
+			foreach my $csv_dest_fname ( keys %$csvs_conf ) {
+
+				die "CSV file '$csv_dest_fname' doesn't match any file name found inside DLI manifest."
+					unless exists $csv_manifest_fnames->{ $csv_dest_fname };
+
+				my $csv_src_fpath = $csvs_conf->{ $csv_dest_fname };
+				die "CSV file '$csv_src_fpath' not found." unless -f $csv_src_fpath;
+
+				my $csv = $uploads->clone;
+				$csv->path_segments( $csv->path_segments, $csv_dest_fname );
+				$self->{agent}->request( new HTTP::Request(
+					PUT => $csv,
+					['Content-Type' => 'application/csv'],
+					slurp_file($csv_src_fpath)
+				) );
+			}
 		}
 	}
 
