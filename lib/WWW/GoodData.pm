@@ -336,6 +336,10 @@ sub projects
 {
 	my $self = shift;
 	die 'Not logged in' unless $self->{login};
+
+	# Hack to remove cache.
+	%links = ();
+
 	$self->get_links (new URI ($self->{login}{userLogin}{profile}),
 		qw/projects project/);
 }
