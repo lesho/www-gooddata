@@ -583,16 +583,22 @@ sub upload_upload_data
 	my $self = shift;
 	my $project = shift;
 	my $file = shift;
+	my $csv_fpath = shift;
+
 
 	# Parse the manifest
 	my $upload_info = decode_json (slurp_file ($file));
 	die "$file: not a SLI manifest"
 		unless $upload_info->{dataSetSLIManifest};
 
+	$csv_fpath = $upload_info->{dataSetSLIManifest}{file} unless $csv_fpath;
+
 	# Construct unique URI in staging area to upload to
 	my $uploads = new URI ($self->get_uri ('uploads'));
-	$uploads->path_segments ($uploads->path_segments,
-		$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time);
+	$uploads->path_segments (
+		$uploads->path_segments,
+		$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time.'-'.$$.'-'.(int rand 10000)
+	);
 	$self->{agent}->request (new HTTP::Request (MKCOL => $uploads));
 
 	# Upload the manifest
@@ -606,7 +612,7 @@ sub upload_upload_data
 	$csv->path_segments ($csv->path_segments, $upload_info->{dataSetSLIManifest}{file});
 	$self->{agent}->request (new HTTP::Request (PUT => $csv,
 		['Content-Type' => 'application/csv'],
-		(slurp_file ($upload_info->{dataSetSLIManifest}{file})
+		(slurp_file ($csv_fpath)
 			|| die 'No CSV file specified in SLI manifest')));
 
 	return {
