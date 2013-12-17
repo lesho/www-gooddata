@@ -578,7 +578,7 @@ Upload and integrate a new data load via Single Loading Interface (SLI).
 
 =cut
 
-sub upload
+sub upload_upload_data
 {
 	my $self = shift;
 	my $project = shift;
@@ -611,7 +611,7 @@ sub upload
 		if ( exists $upload_info->{dataSetSLIManifest} ) {
 			$uploads->path_segments(
 				$uploads->path_segments,
-				$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time
+				$upload_info->{dataSetSLIManifest}{dataSet}.'-'.time.'-'.$$.'-'.(int rand 1000)
 			);
 
 		# DLI
@@ -690,6 +690,20 @@ sub upload
 		}
 	}
 
+	return {
+		project => $project,
+		uploads => $uploads,
+	};
+}
+
+sub upload_post_task
+{
+	my $self = shift;
+	my $upload_info = shift;
+
+	my $project = $upload_info->{project};
+	my $uploads = $upload_info->{uploads};
+
 	# Trigger the integration
 	my $task = $self->{agent}->post (
 		$self->get_uri (new URI ($project),
@@ -697,6 +711,14 @@ sub upload
 			qw/metadata etl pull/),
 		{ pullIntegration => [$uploads->path_segments]->[-1] }
 	)->{pullTask}{uri};
+
+	return $task;
+}
+
+sub upload_poll
+{
+	my $self = shift;
+	my $task = shift;
 
 	# Wait for the task to enter a stable state
 	my $result = $self->poll (
@@ -707,6 +729,17 @@ sub upload
 	return if $result->{taskStatus} eq 'OK';
 	warn 'Upload finished with warnings' if $result->{taskStatus} eq 'WARNING';
 	die 'Upload finished with '.$result->{taskStatus}.' status';
+}
+
+
+sub upload
+{
+	my $self = shift;
+	my ( @all_params ) = @_;
+
+	my $upload_info = $self->upload_upload_data( @all_params );
+	my $task_uri = $self->upload_post_task( $upload_info );
+	return $self->upload_poll( $task_uri );
 }
 
 =item B<poll> BODY CONDITION
